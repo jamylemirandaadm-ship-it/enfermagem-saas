@@ -5,8 +5,9 @@ import { useEffect, useState } from "react";
 // useState → guardar estado (email)
 // useEffect → rodar código quando o componente carrega
 
-import { auth } from "../../lib/firebase";
+import { auth } from "@/lib/firebase";
 // Importa o Firebase Auth configurado por mim
+import { ensureFreeAccess } from "@/lib/ensure-access";
 
 import { onAuthStateChanged, signOut } from "firebase/auth";
 // onAuthStateChanged → escuta se o usuário está logado
@@ -20,17 +21,28 @@ export default function Dashboard() {
 
   // Guarda o email do usuário logado
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [accessError, setAccessError] = useState<string | null>(null);
 
   // 🔐 Proteção de rota
   // Esse efeito roda quando o dashboard carrega
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (!user) {
         // Se NÃO estiver logado → manda para o login
         router.push("/login");
       } else {
-        // Se estiver logado → salva o email para mostrar na tela
-        setUserEmail(user.email);
+        try {
+          setAccessError(null);
+
+          // Eu garanto o plano Free aqui no primeiro ponto apos o login para as outras telas ja lerem acessos/{uid}.
+          await ensureFreeAccess(user.uid);
+
+          // Se estiver logado → salva o email para mostrar na tela
+          setUserEmail(user.email);
+        } catch (e: any) {
+          // Eu mostro uma mensagem amigavel na tela porque sem esse acesso as features podem ficar bloqueadas.
+          setAccessError("Nao consegui preparar seu acesso agora. Tente recarregar a pagina em alguns segundos.");
+        }
       }
     });
 
@@ -56,8 +68,24 @@ export default function Dashboard() {
         </p>
       )}
 
+      {accessError && (
+        <div className="w-full max-w-md rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          {accessError}
+        </div>
+      )}
+
       {/* GRID DE FUNCIONALIDADES */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-md">
+        {/* Eu crio um hub central para concentrar as calculadoras atuais e futuras. */}
+        <button
+          onClick={() => router.push("/calculadoras")}
+          className="border rounded-xl p-4 text-left hover:bg-gray-50 sm:col-span-2"
+        >
+          <p className="font-medium">🧮 Calculadoras</p>
+          <p className="text-sm text-gray-600">
+            Acesse todas as calculadoras em um só lugar
+          </p>
+        </button>
 
         {/* 🧮 Calculadora de Medicação */}
         <button
@@ -106,6 +134,17 @@ export default function Dashboard() {
         {/* 🔮 FUTURAS FUNCIONALIDADES (comentadas)
             Irei ativar quando criar as páginas
         */}
+        {/* Eu deixo um atalho claro para a usuaria conhecer o plano pago. */}
+        <button
+          onClick={() => router.push("/upgrade")}
+          className="border border-emerald-300 rounded-xl p-4 text-left hover:bg-emerald-50 sm:col-span-2"
+        >
+          <p className="font-medium">✨ Ver Plano Pro</p>
+          <p className="text-sm text-gray-600">
+            Compare Free vs Pro e veja como ativar
+          </p>
+        </button>
+
         {/*
         <button
           onClick={() => router.push("/simulado")}

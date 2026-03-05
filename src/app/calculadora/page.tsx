@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { auth, db } from "@/lib/firebase";
+import { LimitCta } from "@/components/LimitCta";
 import {
   FREE_DAILY_LIMIT,
   canUseApp,
@@ -31,6 +32,7 @@ export default function CalculadoraMedicacao() {
   const [accessPlan, setAccessPlan] = useState<AccessPlan | null>(null);
   const [dailyUsage, setDailyUsage] = useState<DailyUsage | null>(null);
   const [resultMl, setResultMl] = useState<number | null>(null);
+  const [uiMessage, setUiMessage] = useState<string | null>(null);
   const [loadingUsage, setLoadingUsage] = useState(true);
   const [isCalculating, setIsCalculating] = useState(false);
 
@@ -57,7 +59,8 @@ export default function CalculadoraMedicacao() {
           setAccessPlan(access);
           setDailyUsage(usage);
         } catch (e: any) {
-          alert("Erro ao carregar seu acesso: " + e.message);
+          // Eu mostro o erro na tela para evitar pop-ups interrompendo o fluxo.
+          setUiMessage("Erro ao carregar seu acesso. Tente novamente em instantes.");
         } finally {
           setLoadingUsage(false);
         }
@@ -92,14 +95,22 @@ export default function CalculadoraMedicacao() {
   const isLimitReached = hasReachedLimit(accessPlan, dailyUsage, "calculadora");
 
   const handleCalculate = async () => {
-    if (!uid) return alert("Voce precisa estar logada.");
-    if (!formState.ok) return alert("Preencha os campos corretamente antes de calcular.");
+    if (!uid) {
+      setUiMessage("Erro de sessão. Faça login novamente.");
+      return;
+    }
+    if (!formState.ok) {
+      setUiMessage(formState.message);
+      return;
+    }
     if (!accessPlan || !canUseApp(accessPlan)) {
-      return alert("Seu acesso esta inativo ou nao foi encontrado.");
+      setUiMessage("Acesso inativo ou não encontrado.");
+      return;
     }
 
     try {
       setIsCalculating(true);
+      setUiMessage(null);
 
       // Eu delego a validacao final do limite para a transacao porque ela protege contra cliques rapidos.
       const transactionResult = await incrementDailyUsage(uid, "calculadora", accessPlan);
@@ -107,22 +118,31 @@ export default function CalculadoraMedicacao() {
       setDailyUsage(transactionResult.usage);
 
       if (transactionResult.status !== "incremented") {
-        return alert("Voce atingiu o limite diario da calculadora no plano Free.");
+        // Eu mostro uma mensagem clara no estado da tela quando a transacao devolve limite atingido.
+        setUiMessage("Você atingiu o limite diário da Calculadora no Plano Free.");
+        return;
       }
 
       // Eu so mostro o resultado depois que a transacao confirma que o uso foi consumido com sucesso.
       const ml = (formState.dose * formState.vol) / formState.conc;
       setResultMl(ml);
+      setUiMessage(null);
     } catch (e: any) {
-      alert("Erro ao registrar o uso diario: " + e.message);
+      setUiMessage("Erro ao registrar o uso diário. Tente novamente.");
     } finally {
       setIsCalculating(false);
     }
   };
 
   const handleSave = async () => {
-    if (!uid) return alert("Você precisa estar logada.");
-    if (resultMl === null) return alert("Calcule primeiro antes de salvar.");
+    if (!uid) {
+      setUiMessage("Erro de sessão. Faça login novamente.");
+      return;
+    }
+    if (resultMl === null) {
+      setUiMessage("Calcule primeiro antes de salvar.");
+      return;
+    }
 
     try {
       await addDoc(collection(db, "calculos"), {
@@ -135,9 +155,9 @@ export default function CalculadoraMedicacao() {
         createdAt: serverTimestamp(),
       });
 
-      alert("Salvo no histórico ✅");
+      setUiMessage("Cálculo salvo no histórico.");
     } catch (e: any) {
-      alert("Erro ao salvar: " + e.message);
+      setUiMessage("Erro ao salvar no histórico. Tente novamente.");
     }
   };
 
@@ -185,15 +205,14 @@ export default function CalculadoraMedicacao() {
         </div>
 
         <div className="rounded-lg border p-4 space-y-2">
-          {!canUseFeature ? (
-            <p className="text-sm text-red-600">Acesso inativo ou nao encontrado.</p>
-          ) : accessPlan?.isPro ? (
-            <p className="text-sm text-green-700">Plano Pro ativo: uso ilimitado.</p>
-          ) : (
-            <p className="text-sm text-gray-700">
-              Plano Free: {calculadoraCount}/{FREE_DAILY_LIMIT} usos hoje.
-            </p>
-          )}
+          <LimitCta
+            isPro={Boolean(accessPlan?.isPro)}
+            canUseFeature={canUseFeature}
+            count={calculadoraCount}
+            limit={FREE_DAILY_LIMIT}
+            isLimitReached={isLimitReached}
+            uiMessage={uiMessage}
+          />
 
           {resultMl === null ? (
             <p className="text-sm text-gray-700">Preencha os campos e clique em Calcular.</p>
@@ -219,10 +238,12 @@ export default function CalculadoraMedicacao() {
           <button
             className="flex-1 border rounded p-2"
             onClick={() => {
+              // Eu limpo os campos e mensagens para reiniciar a tela de forma previsivel.
               setDoseMg("");
               setConcMg("");
               setVolMl("");
               setResultMl(null);
+              setUiMessage(null);
             }}
           >
             Limpar
@@ -233,7 +254,7 @@ export default function CalculadoraMedicacao() {
             onClick={handleCalculate}
             disabled={loadingUsage || isCalculating || !canUseFeature || isLimitReached}
           >
-            {isCalculating ? "Calculando..." : "Calcular"}
+            {isLimitReached ? "Limite atingido" : isCalculating ? "Calculando..." : "Calcular"}
           </button>
 
           <button
